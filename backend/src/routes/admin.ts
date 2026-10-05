@@ -1,0 +1,5 @@
+import {Router} from 'express'; import {prisma} from '../lib/prisma.js'; import {auth,admin} from '../middleware/auth.js'; const r=Router(); r.use(auth,admin);
+r.get('/stats',async(_,res)=>{const [users,beats,orders,paid]=await Promise.all([prisma.user.count(),prisma.beat.count(),prisma.order.count(),prisma.order.aggregate({where:{status:'PAID'},_sum:{amountKobo:true}})]);res.json({users,beats,orders,revenueKobo:paid._sum.amountKobo||0})});
+r.get('/orders',async(_,res)=>res.json(await prisma.order.findMany({include:{items:true},orderBy:{createdAt:'desc'}})));
+r.post('/beats',async(req,res)=>{const {title,slug,genre,mood,bpm,musicalKey,description,coverUrl,previewUrl}=req.body;const b=await prisma.beat.create({data:{title,slug,genre,mood,bpm:Number(bpm),musicalKey,description,coverUrl,previewUrl}});res.json(b)});
+r.patch('/beats/:id',async(req,res)=>res.json(await prisma.beat.update({where:{id:req.params.id},data:req.body}))); r.delete('/beats/:id',async(req,res)=>{await prisma.beat.delete({where:{id:req.params.id}});res.sendStatus(204)}); export default r;

@@ -1,0 +1,3 @@
+import {Router} from 'express'; import {prisma} from '../lib/prisma.js'; const r=Router();
+r.get('/',async(req,res)=>{const {genre,mood,q}=req.query;const beats=await prisma.beat.findMany({where:{isPublished:true,...genre?{genre:String(genre)}:{},...mood?{mood:String(mood)}:{},...q?{OR:[{title:{contains:String(q),mode:'insensitive'}},{genre:{contains:String(q),mode:'insensitive'}}]}:{}},include:{licenses:true},orderBy:{createdAt:'desc'}});res.json(beats)});
+r.get('/:slug',async(req,res)=>{const b=await prisma.beat.findUnique({where:{slug:req.params.slug},include:{licenses:true}});if(!b)return res.status(404).json({message:'Beat not found'});res.json(b)}); export default r;

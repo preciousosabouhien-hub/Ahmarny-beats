@@ -1,0 +1,15 @@
+node_modules/
+venv/
+.venv/
+__pycache__/
+*.py[cord]
+.env
+.env.*
+!.env.example
+.next/
+out/
+*.logs
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

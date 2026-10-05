@@ -1,0 +1,71 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql" url = env("DATABASE_URL") directUrl = env("DIRECT_URL") }
+
+enum Role { CUSTOMER ADMIN }
+enum OrderStatus { PENDING PAID FAILED REFUNDED CANCELLED }
+enum LicenseType { MP3_LEASE WAV_LEASE TRACKOUT EXCLUSIVE }
+model User {
+ id String @id @default(cuid())
+ name String
+ email String @unique
+ passwordHash String
+ role Role @default(CUSTOMER)
+ createdAt DateTime @default(now())
+ orders Order[]
+}
+model Beat {
+ id String @id @default(cuid())
+ title String
+ slug String @unique
+ producer String @default("Ahmarny")
+ genre String
+ mood String?
+ bpm Int
+ musicalKey String
+ description String?
+ coverUrl String?
+ previewUrl String?
+ isPublished Boolean @default(true)
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ licenses License[]
+ orderItems OrderItem[]
+}
+model License {
+ id String @id @default(cuid())
+ beatId String
+ type LicenseType
+ name String
+ priceKobo Int
+ details String?
+ beat Beat @relation(fields:[beatId], references:[id], onDelete:Cascade)
+ orderItems OrderItem[]
+ @@unique([beatId,type])
+}
+model Order {
+ id String @id @default(cuid())
+ reference String @unique
+ userId String?
+ email String
+ customerName String
+ amountKobo Int
+ currency String @default("NGN")
+ status OrderStatus @default(PENDING)
+ paystackReference String? @unique
+ createdAt DateTime @default(now())
+ paidAt DateTime?
+ user User? @relation(fields:[userId], references:[id], onDelete:SetNull)
+ items OrderItem[]
+}
+model OrderItem {
+ id String @id @default(cuid())
+ orderId String
+ beatId String
+ licenseId String
+ beatTitle String
+ licenseName String
+ priceKobo Int
+ order Order @relation(fields:[orderId], references:[id], onDelete:Cascade)
+ beat Beat @relation(fields:[beatId], references:[id])
+ license License @relation(fields:[licenseId], references:[id])
+}
