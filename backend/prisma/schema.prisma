@@ -36,6 +36,7 @@ model User {
     role Role               @default(CUSTOMER)
     createdAt    DateTime   @default(now())
     orders Order[]
+    cartItems CartItem[]
 }
 model Beat {
     id           String @id @default(cuid())
@@ -54,6 +55,7 @@ model Beat {
     updatedAt    DateTime   @updatedAt
     licenses License[]
     orderItems OrderItem[]
+    cartItems CartItem[]
 }
 model License {
     id          String @id @default(cuid())
@@ -64,6 +66,7 @@ model License {
     details     String?
     beat Beat   @relation(fields:[beatId], references:[id], onDelete:Cascade)
     orderItems OrderItem[]
+    cartItems CartItem[]
     @@unique([beatId,type])
 }
 model Order {
@@ -92,4 +95,20 @@ model OrderItem {
     order Order @relation(fields:[orderId], references:[id], onDelete:Cascade)
     beat Beat @relation(fields:[beatId], references:[id])
     license License @relation(fields:[licenseId], references:[id])
+}
+
+
+// A cart row belongs to a customer account, so it can be restored on any device.
+model CartItem {
+    id        String   @id @default(cuid())
+    userId    String
+    beatId    String
+    licenseId String
+    createdAt DateTime @default(now())
+    user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    beat      Beat     @relation(fields: [beatId], references: [id], onDelete: Cascade)
+    license   License  @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+    @@unique([userId, licenseId])
+    @@index([userId, createdAt])
 }
