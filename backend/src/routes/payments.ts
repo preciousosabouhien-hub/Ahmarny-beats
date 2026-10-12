@@ -1,32 +1,114 @@
-import {Router} from 'express';
-import crypto from 'crypto';
-import {prisma} from '../lib/prisma.js';
-import {auth, AuthRequest} from '../middleware/auth.js';
+import { Router } from 'express';
+import crypto from 'node:crypto';
+import { prisma } from '../lib/prisma.js';
+import { auth, AuthRequest } from '../middleware/auth.js';
 
-const r=Router();
+const r = Router();
+const secretKey = () => process.env.PAYSTACK_SECRET_KEY;
 
-r.post('/paystack/initialize',auth,async(req:AuthRequest,res)=>{
-  const {orderId}=req.body||{};
-  const order=await prisma.order.findUnique({where:{id:orderId}});
-  if(!order)return res.status(404).json({message:'Order not found'});
-  if(order.userId && order.userId!==req.user!.id)return res.status(403).json({message:'You cannot pay for this order'});
-  if(!process.env.PAYSTACK_SECRET_KEY)return res.status(503).json({message:'Paystack is not configured'});
-  const response=await fetch('https://api.paystack.co/transaction/initialize',{method:'POST',headers:{Authorization:`Bearer ${process.env.PAYSTACK_SECRET_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({email:order.email,amount:order.amountKobo,reference:order.reference,callback_url:`${process.env.FRONTEND_URL}/payment/callback`})});
-  const data=await response.json();
-  if(!response.ok||!data.status)return res.status(400).json({message:data.message||'Payment initialization failed'});
-  await prisma.order.update({where:{id:order.id},data:{paystackReference:data.data.reference}});
-  res.json({authorization_url:data.data.authorization_url,reference:data.data.reference});
+r.post('/paystack/initialize', auth, async (req: AuthRequest, res) => {
+  try {
+    const orderId = typeof req.body?.orderId === 'string' ? req.body.orderId : '';
+    if (!orderId) return res.status(400).json({ message: 'Order ID is required' });
+    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+    if (order.userId !== req.user!.id) return res.status(403).json({ message: 'You cannot pay for this order' });
+    if (order.status === 'PAID') return res.status(409).json({ message: 'This order has already been paid' });
+    if (order.status !== 'PENDING') return res.status(409).json({ message: 'This order is not payable' });
+    if (!secretKey()) return res.status(503).json({ message: 'Paystack is not configured' });
+    if (!Number.isInteger(order.amountKobo) || order.amountKobo <= 0) return res.status(400).json({ message: 'Invalid order amount' });
+
+    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+    const response = await fetch('https://api.paystack.co/transaction/initialize', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${secretKey()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: order.email,
+        amount: order.amountKobo,
+        currency: order.currency,
+        reference: order.reference,
+        callback_url: `${frontendUrl}/payment/callback`,
+        metadata: { orderId: order.id, orderReference: order.reference },
+      }),
+    });
+    const data: any = await response.json().catch(() => ({}));
+    if (!response.ok || !data.status || !data.data?.authorization_url || !data.data?.reference) {
+      return res.status(400).json({ message: data.message || 'Payment initialization failed' });
+    }
+    await prisma.order.update({ where: { id: order.id }, data: { paystackReference: data.data.reference } });
+    return res.json({ authorization_url: data.data.authorization_url, reference: data.data.reference });
+  } catch (error) {
+    console.error('Paystack initialization error:', error);
+    return res.status(500).json({ message: 'Could not start payment. Please try again.' });
+  }
 });
 
-r.post('/paystack/webhook',async(req,res)=>{
-  const signature=req.headers['x-paystack-signature'];
-  const hash=crypto.createHmac('sha512',process.env.PAYSTACK_SECRET_KEY||'').update(JSON.stringify(req.body)).digest('hex');
-  if(signature!==hash)return res.status(401).end();
-  if(req.body?.event==='charge.success'){
-    const ref=req.body.data?.reference;
-    await prisma.order.updateMany({where:{OR:[{reference:ref},{paystackReference:ref}]},data:{status:'PAID',paidAt:new Date()}});
+r.get('/paystack/verify', async (req, res) => {
+  const reference = String(req.query.reference || '').trim();
+  if (!reference) return res.status(400).json({ message: 'Payment reference is required' });
+  if (!secretKey()) return res.status(503).json({ message: 'Paystack is not configured' });
+  try {
+    const order = await prisma.order.findFirst({ where: { OR: [{ reference }, { paystackReference: reference }] } });
+    if (!order) return res.status(404).json({ message: 'Order not found for this payment reference' });
+    if (order.status === 'PAID') return res.json({ status: 'PAID', reference: order.reference });
+
+    const response = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
+      headers: { Authorization: `Bearer ${secretKey()}` },
+    });
+    const data: any = await response.json().catch(() => ({}));
+    if (!response.ok || !data.status) return res.status(400).json({ message: data.message || 'Could not verify payment' });
+    const tx = data.data;
+    const valid = tx?.status === 'success'
+      && tx?.reference === reference
+      && Number(tx?.amount) === order.amountKobo
+      && tx?.currency === order.currency;
+
+    if (valid) {
+      await prisma.order.updateMany({
+        where: { id: order.id, status: 'PENDING' },
+        data: { status: 'PAID', paidAt: new Date(), paystackReference: reference },
+      });
+      const latest = await prisma.order.findUnique({ where: { id: order.id }, select: { status: true } });
+      return res.json({ status: latest?.status || 'PENDING', reference: order.reference });
+    }
+    if (tx?.status === 'failed' && order.status === 'PENDING') {
+      await prisma.order.updateMany({ where: { id: order.id, status: 'PENDING' }, data: { status: 'FAILED' } });
+      return res.json({ status: 'FAILED', reference: order.reference });
+    }
+    return res.json({ status: 'PENDING', reference: order.reference });
+  } catch (error) {
+    console.error('Paystack verification error:', error);
+    return res.status(500).json({ message: 'Payment verification failed. Please try again.' });
   }
-  res.sendStatus(200);
+});
+
+r.post('/paystack/webhook', async (req, res) => {
+  const secret = secretKey();
+  const signature = req.headers['x-paystack-signature'];
+  const rawBody: Buffer | undefined = (req as any).rawBody;
+  if (!secret || typeof signature !== 'string' || !rawBody) return res.sendStatus(401);
+  const expected = crypto.createHmac('sha512', secret).update(rawBody).digest();
+  let supplied: Buffer;
+  try { supplied = Buffer.from(signature, 'hex'); } catch { return res.sendStatus(401); }
+  if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return res.sendStatus(401);
+
+  try {
+    if (req.body?.event === 'charge.success') {
+      const tx = req.body?.data;
+      const reference = typeof tx?.reference === 'string' ? tx.reference : '';
+      if (reference && tx?.status === 'success') {
+        const order = await prisma.order.findFirst({ where: { OR: [{ reference }, { paystackReference: reference }] } });
+        // Never fulfil an order from a webhook unless amount, currency and reference match.
+        if (order && Number(tx.amount) === order.amountKobo && tx.currency === order.currency && order.status === 'PENDING') {
+          await prisma.order.updateMany({ where: { id: order.id, status: 'PENDING' }, data: { status: 'PAID', paidAt: new Date(), paystackReference: reference } });
+        }
+      }
+    }
+    return res.sendStatus(200);
+  } catch (error) {
+    console.error('Paystack webhook processing error:', error);
+    return res.sendStatus(500);
+  }
 });
 
 export default r;

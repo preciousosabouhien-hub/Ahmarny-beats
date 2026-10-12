@@ -8,7 +8,8 @@
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "prisma:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.15.0",
@@ -17,7 +18,9 @@
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
-    "zod": "^4.1.5"
+    "zod": "^4.1.5",
+    "@supabase/supabase-js": "^2.57.4",
+    "multer": "^2.0.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
@@ -26,7 +29,8 @@
     "@types/node": "^24.3.0",
     "prisma": "^6.15.0",
     "tsx": "^4.20.5",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "@types/multer": "^2.0.0"
   },
   "allowScripts": {
     "@prisma/client@6.19.3": true,

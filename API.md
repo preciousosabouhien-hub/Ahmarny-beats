@@ -39,6 +39,24 @@ Single beat:
 
 Each beat includes its available licenses and prices.
 
+## Account-backed cart
+
+Get the signed-in customer's cart:
+`GET /cart`
+
+Replace the cart contents (up to 20 items):
+`PUT /cart`
+
+```json
+{
+  "items": [
+    {"beatId":"...","licenseId":"..."}
+  ]
+}
+```
+
+Only published beats and licences that belong to the selected beat are accepted. The server stores cart rows against the authenticated user, so the same cart can be restored on another device. Guest carts remain local until sign-in.
+
 ## Orders
 
 Create order:
